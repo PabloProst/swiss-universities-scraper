@@ -1,9 +1,9 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from typing import List, Dict
+from pathlib import Path
 
-WIKI_URL = "https://en.wikipedia.org/wiki/List_of_universities_in_Switzerland"
+URL = "https://en.wikipedia.org/wiki/List_of_universities_in_Switzerland"
 
 HEADERS = {
     "User-Agent": (
@@ -13,36 +13,53 @@ HEADERS = {
     )
 }
 
-def fetch_page(url: str) -> BeautifulSoup:
-    """Download Wikipedia page and return parsed HTML."""
-    response = requests.get(url, headers=HEADERS)
+def scrape_universities_basic():
+    """Scrape only the basic info table from Wikipedia."""
+    response = requests.get(URL, headers=HEADERS)
     response.raise_for_status()
-    return BeautifulSoup(response.content, "html.parser")
+    soup = BeautifulSoup(response.content, "html.parser")
 
-def extract_universities(table) -> List[Dict[str, str]]:
-    """Extract university data from HTML table."""
-    universities = []
-
-    for row in table.find_all("tr")[1:]:
-        columns = row.find_all("td")
-
-        if not columns:
-            continue
-
-        uni_name = columns[0].text.strip()
-        location = columns[1].text.strip() if len(columns) > 1 else "Unknown"
-
-        universities.append({
-            "University": uni_name,
-            "Location": location,
-        })
-
-    return universities
-
-def scrape_universities() -> pd.DataFrame:
-    """Main scraping pipeline."""
-    soup = fetch_page(WIKI_URL)
     tables = soup.find_all("table", class_="wikitable")
-    universities_table = tables[1]
-    data = extract_universities(universities_table)
-    return pd.DataFrame(data)
+    info_table = tables[0]  # basic info table
+
+    # Extract headers from the first row only
+    headers = [th.text.strip() for th in info_table.find("tr").find_all("th")]
+
+    rows = []
+    for tr in info_table.find_all("tr")[1:]:
+        cells = tr.find_all("td")
+        if not cells:
+            continue
+        row = [cell.text.strip() for cell in cells]
+        # Ensure row has same number of columns as headers
+        while len(row) < len(headers):
+            row.append(None)
+        rows.append(row)
+
+    df = pd.DataFrame(rows, columns=headers)
+
+    # Keep only relevant columns
+    columns_needed = ['Institution', 'Abbreviation', 'Location', 'Founded', 'Language', 'Type', 'Enrollment']
+    df = df[columns_needed]
+
+    # Rename first column to 'University'
+    df.rename(columns={'Institution': 'University'}, inplace=True)
+
+    # Strip spaces from column names
+    df.columns = [col.strip() for col in df.columns]
+
+    return df
+    
+def main():
+    df = scrape_universities_basic()
+    
+    # Ensure folder exists
+    Path("data/raw").mkdir(parents=True, exist_ok=True)
+    
+    # Save CSV
+    df.to_csv("data/raw/swiss_universities_basic.csv", index=False, encoding="utf-8")
+    print("CSV with basic university info generated successfully!")
+    print(df.head())
+
+if __name__ == "__main__":
+    main()
